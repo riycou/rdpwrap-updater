@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+*.log
+data/
+*.backup-*
+*.jsonl
+.env
+publish-repository.json
+release-metadata.json

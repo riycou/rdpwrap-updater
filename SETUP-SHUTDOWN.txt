@@ -1,0 +1,35 @@
+Configure once as administrator (Windows Pro):
+
+1. Extract this ZIP into C:\Program Files\RDPWrapUpdater.
+   Use an administrator-owned folder: the shutdown script runs as SYSTEM.
+2. Open gpedit.msc as administrator.
+3. Go to Computer Configuration > Windows Settings > Scripts (Startup/Shutdown).
+4. Open Shutdown. On the Scripts tab, click Add.
+5. Script Name:
+   C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+   Script Parameters:
+   -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\Program Files\RDPWrapUpdater\Shutdown-Update.ps1"
+   For a custom INI, append: -Ini "C:\your\rdpwrap.ini"
+6. Apply. Do not add an event-triggered task as a substitute: it may be killed
+   before the check finishes. The Group Policy shutdown script waits for it.
+
+The hook silently checks the 25 most recently UPDATED issues (open and closed),
+including their comments. It saves the current window of 25 threads and a
+rolling history of the last 250 issue changes/labels. It applies only a unique,
+validated profile for the currently installed termsrv.dll version, with backup.
+It does not alter labels on GitHub, restart RDP, or install startup checks.
+
+State/logs are C:\ProgramData\RDPWrapUpdater\recent-issues.json and
+C:\ProgramData\RDPWrapUpdater\shutdown-runs.jsonl.
+An unchanged poll normally costs one conditional list request. Changed issues
+require comment requests, up to 30 requests/40 seconds total. Completed thread
+fetches are checkpointed so interrupted/rate-limited scans can resume next time.
+If the poll is incomplete, no INI is applied. Missing offsets, rate limits and
+network errors are logged and shutdown continues. Network time is bounded;
+overall script completion also includes local validation and disk operations.
+
+Only the recent window is searched: a matching profile outside it may be missed.
+Forced shutdowns/power loss cannot run the hook reliably. Windows updates may
+install a different DLL after the check. Runtime RDP reliability remains unproven.
+
+Remove by deleting this entry from the same Shutdown Scripts dialog.

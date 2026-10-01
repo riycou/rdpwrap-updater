@@ -1,0 +1,39 @@
+name: Test and build Windows updater
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+      - name: Test (synthetic fixtures; no real INI or service changes)
+        run: python -m unittest discover -s tests -v
+      - name: Prepare build environment
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+      - name: Build portable executables
+        shell: pwsh
+        run: .\build.ps1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rdpwrap-updater-windows-x64
+          path: |
+            dist/*.exe
+            README.md
+            LICENSE
+            THIRD_PARTY.md
+            licenses/
+            Shutdown-Update.ps1
+            SETUP-SHUTDOWN.txt
