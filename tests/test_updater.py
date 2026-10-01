@@ -223,6 +223,12 @@ class Tests(unittest.TestCase):
                     )
             self.assertEqual(calls, ["snapshot", "stop", "restore"])
 
+    def test_empty_service_snapshot_runs_no_commands(self):
+        with patch.object(u.subprocess, "run") as run:
+            self.assertIsNone(u.service_command("stop", []))
+            self.assertIsNone(u.service_command("restore", []))
+            run.assert_not_called()
+
     def test_service_restore_failure_is_reported(self):
         def service(action, names=None):
             if action == "snapshot":
