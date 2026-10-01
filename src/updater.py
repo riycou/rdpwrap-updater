@@ -274,7 +274,15 @@ def live_documents(version):
     return docs
 
 
-def recent_documents(cache_path, limit=25, seconds=40):
+def default_issue_cache():
+    return (
+        pathlib.Path(os.environ.get("LOCALAPPDATA", str(pathlib.Path.home())))
+        / "RDPWrapUpdater"
+        / "recent-issues.json"
+    )
+
+
+def recent_documents(cache_path, limit=50, seconds=40):
     """Bounded poll; reuse unchanged threads, commit cache only after complete fetch."""
     cache_path = pathlib.Path(cache_path)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -288,7 +296,7 @@ def recent_documents(cache_path, limit=25, seconds=40):
     def get(route, etag=None):
         nonlocal requests
         remaining = deadline - time.monotonic()
-        if remaining <= 0 or requests >= 30:
+        if remaining <= 0 or requests >= limit + 5:
             raise Refused("Poll time/request budget exhausted; retry next shutdown")
         requests += 1
         headers = {
@@ -323,7 +331,9 @@ def recent_documents(cache_path, limit=25, seconds=40):
             "per_page": limit,
         }
     )
-    result, etag = get(route, cache.get("etag"))
+    result, etag = get(
+        route, cache.get("etag") if cache.get("limit") == limit else None
+    )
     if result is None:
         items = cache.get("items", [])
         if not items:
@@ -394,6 +404,7 @@ def recent_documents(cache_path, limit=25, seconds=40):
         atomic_write(cache_path, json.dumps(cache, indent=2).encode())
     saved = {
         "etag": etag,
+        "limit": limit,
         "items": items,
         "threads": threads,
         "history": events[-250:],
@@ -565,7 +576,7 @@ def check(path, offline=False, documents=None, offline_file=None):
             )
         ]
     else:
-        docs = live_documents(version)
+        docs = recent_documents(default_issue_cache(), 50)
     codes, added_codes, code_sources = resolve_patch_codes(
         docs, version, codes, not offline
     )
@@ -720,7 +731,7 @@ def gui(initial):
     from tkinter import filedialog, messagebox, ttk
 
     window = tk.Tk()
-    window.title("RDP Wrapper Updater 1.2.3")
+    window.title("RDP Wrapper Updater 1.2.4")
     window.geometry("780x500")
     window.minsize(560, 320)
     window.columnconfigure(0, weight=1)
@@ -751,7 +762,7 @@ def gui(initial):
     browse_button.pack(side="right")
     ttk.Label(
         window,
-        text="Checks issue bodies and comments in stascorp/rdpwrap. Service restart is manual.",
+        text="Checks the 50 most recently updated issues and cached comments. Service restart is manual.",
         wraplength=530,
     ).grid(row=2, column=0, sticky="w", padx=12, pady=8)
     output = tk.Text(window, wrap="word", height=8, width=50)
@@ -801,7 +812,7 @@ def gui(initial):
         except PermissionError as error:
             elevated = bool(ctypes.windll.shell32.IsUserAnAdmin())
             failure_details = (
-                "Version: 1.2.3\n"
+                "Version: 1.2.4\n"
                 + "Administrator token: "
                 + ("yes" if elevated else "no")
                 + "\n"
@@ -899,8 +910,8 @@ def main():
     p.add_argument(
         "--recent",
         type=int,
-        choices=[25],
-        help="Poll only 25 recently updated issues, using a rolling cache",
+        choices=[25, 50],
+        help="Poll 25 or 50 recently updated issues, using a rolling cache",
     )
     p.add_argument("--cache", help="Recent-issue cache JSON path")
     p.add_argument("--offline-file", help="Your own reference INI; requires --offline")

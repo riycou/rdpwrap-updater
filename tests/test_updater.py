@@ -187,6 +187,35 @@ class Tests(unittest.TestCase):
                 u.recent_documents(p)
             self.assertEqual(before, p.read_bytes())
 
+    def test_fifty_issue_window_and_cache_scope(self):
+        import io
+        class Response:
+            headers = {"ETag": "fifty"}
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, *args): return self.data.read(*args)
+        calls = []
+        def request(req, **kwargs):
+            calls.append(req)
+            response = Response()
+            response.data = io.BytesIO(json.dumps({"incomplete_results": False, "items": [
+                {"number": n, "body": "body", "comments": 0, "updated_at": "now", "state": "closed", "labels": [], "locked": True,
+                 "html_url": "https://github.com/stascorp/rdpwrap/issues/" + str(n)}
+                for n in range(1, 51)]}).encode())
+            return response
+        with tempfile.TemporaryDirectory() as d, patch.object(u.urllib.request, "urlopen", side_effect=request):
+            path = pathlib.Path(d) / "cache.json"
+            path.write_text(json.dumps({"limit": 25, "etag": "old"}), encoding="utf-8")
+            self.assertEqual(len(u.recent_documents(path, 50)), 50)
+            self.assertIn("per_page=50", calls[0].full_url)
+            self.assertIsNone(calls[0].get_header("If-none-match"))
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["limit"], 50)
+            self.assertEqual(len(saved["threads"]), 50)
+            u.recent_documents(path, 50)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[1].get_header("If-none-match"), "fifty")
+
     def test_silent_auto_and_error_logging(self):
         import io, contextlib
 

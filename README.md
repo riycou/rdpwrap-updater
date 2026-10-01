@@ -10,7 +10,7 @@ Download the ZIP from [Releases](https://github.com/riycou/rdpwrap-updater/relea
 
 The default path is `C:\Program Files\RDP Wrapper\rdpwrap.ini`. A portable release needs no Python installation or AI model. Both packaged executables require administrator access at launch. Windows requests UAC consent before starting them unless the launching process is already elevated. The updater does not relaunch itself after a denied write. Python source runs must be started in an administrator terminal when updating protected files.
 
-If the INI is missing, undecodable as UTF-8, or has missing/invalid global configuration sections, the updater builds a proposal from the bundled [base INI](assets/base.ini). The base contains global configuration and verified patch definitions, **no Windows build offsets**. Only a validated profile for your installed DLL is added. Existing files are backed up before replacement; read-only checks never create or replace the INI. UTF-16 files still require manual handling. A readable, usable INI is preserved, with only missing source-verified patch definitions added as needed. The output reports when the base is used and why. This creates configuration, not an RDP Wrapper installation.
+If the INI is missing, undecodable as UTF-8, or has missing/invalid global configuration sections, the updater builds a proposal from the bundled [base INI](assets/base.ini). The base contains global configuration, verified patch definitions, and 738 existing build profiles from the owner-provided baseline. Only a validated profile for your installed DLL is added. Existing files are backed up before replacement; read-only checks never create or replace the INI. UTF-16 files still require manual handling. A readable, usable INI is preserved, with only missing source-verified patch definitions added as needed. The output reports when the base is used and why. This creates configuration, not an RDP Wrapper installation.
 
 ```powershell
 # Read-only check
@@ -19,8 +19,8 @@ If the INI is missing, undecodable as UTF-8, or has missing/invalid global confi
 # Check and apply automatically, with no console window or prompts
 .\RDPWrapUpdaterSilent.exe --ini "C:\Program Files\RDP Wrapper\rdpwrap.ini" --auto --silent
 
-# Limit retrieval to 25 recently updated issues, caching unchanged threads
-.\RDPWrapUpdaterSilent.exe --ini "C:\Program Files\RDP Wrapper\rdpwrap.ini" --auto --silent --recent 25
+# Poll 50 recently updated issues, caching unchanged threads
+.\RDPWrapUpdaterSilent.exe --ini "C:\Program Files\RDP Wrapper\rdpwrap.ini" --auto --silent --recent 50
 ```
 
 Run automatic updates from an administrator terminal or an appropriately privileged task. Every changed INI gets a timestamped backup beside it. **Service restart is manual:** finish your RDP sessions before restarting Remote Desktop Services or rebooting. The updater never stops or kills the service.
@@ -40,9 +40,9 @@ These checks validate structure and some binary properties. They **do not prove 
 
 Follow [SETUP-SHUTDOWN.txt](SETUP-SHUTDOWN.txt) to register [Shutdown-Update.ps1](Shutdown-Update.ps1) as a Windows Group Policy shutdown script. Registration is manual and requires administrator privileges on Windows Pro or a compatible edition. Extract the executable and script into an administrator-owned folder such as `C:\Program Files\RDPWrapUpdater`.
 
-The poll selects the **25 most recently updated issues**, including closed issues. It compares issue timestamps, bodies, comment counts, labels, and state against the previous cache, and fetches comments only for changed threads. It retains the current 25 threads plus the last 250 issue-change records with issue numbers, URLs, labels, timestamps, and lock status. Labels are recorded locally; nothing is posted to GitHub.
+The poll selects the **50 most recently updated issues**, including closed issues. It compares issue timestamps, bodies, comment counts, labels, and state against the previous cache, and fetches comments only for changed threads. It retains the current 50 threads plus the last 250 issue-change records with issue numbers, URLs, labels, timestamps, and lock status. Labels are recorded locally; nothing is posted to GitHub.
 
-An unchanged live test used one conditional GitHub request. A changed poll may need up to 30 requests, with a 40-second network budget and an 8-second maximum per request. Completed thread fetches are checkpointed; an incomplete poll cannot apply an INI. Rate limits, missing profiles, and network errors are logged, and the shutdown script lets shutdown continue. Local validation and disk operations add to overall run time.
+An unchanged live test used one conditional GitHub request. A changed poll may need up to 55 requests, with a 40-second network budget and an 8-second maximum per request. Completed thread fetches are checkpointed; an incomplete poll cannot apply an INI. Rate limits, missing profiles, and network errors are logged, and the shutdown script lets shutdown continue. Local validation and disk operations add to overall run time.
 
 Default CLI state is under `%LOCALAPPDATA%\RDPWrapUpdater`. The shutdown script uses `C:\ProgramData\RDPWrapUpdater`:
 
@@ -61,7 +61,7 @@ Use `--cache PATH` and `--log PATH` to override locations. `GITHUB_TOKEN` is opt
 | `--check` / `--dry-run` | Check without writing the INI |
 | `--apply` / `--auto` | Check and apply a validated profile |
 | `--silent` | Suppress application output; Windows can still request UAC consent at launch. Implies automatic apply unless `--check` is supplied |
-| `--recent 25` | Poll/cache only the 25 most recently updated issues |
+| `--recent 50` | Poll/cache only the 50 most recently updated issues |
 | `--cache PATH` | Recent-issue cache path |
 | `--log PATH` | Append JSON run records to this path |
 | `--offline --offline-file PATH` | Read profiles from your own reference INI |
@@ -84,7 +84,7 @@ The public tests generate **fictional offsets** solely to test parsing; they are
 ## Limitations
 
 - Live lookup reads issue bodies and comments; it does not download newly posted attachments or search other repositories.
-- Recent-only mode can miss a matching profile outside the selected 25 issues. Default mode searches for the installed version.
+- Recent-only mode can miss a matching profile outside the selected 50 issues. Default mode also uses the latest 50 issues. --recent 25 is available for a smaller poll.
 - GitHub indexing, network availability, and rate limits can prevent discovery.
 - The parser deliberately refuses incomplete or conflicting data; new schema conventions may need a code update.
 - Only Windows x64 is supported. UTF-16 INI files require manual handling.
@@ -95,4 +95,4 @@ The public tests generate **fictional offsets** solely to test parsing; they are
 
 Bug reports and pull requests are welcome. Include your DLL's fixed version, the source issue URL, the relevant error, and a minimal redacted example. Never upload credentials or private machine logs. Changes that accept new profiles should include both valid examples and malformed/conflicting examples.
 
-The updater's original code, tests, and documentation are open source under the [MIT License](LICENSE). The upstream-derived base INI retains Apache-2.0 licensing and attribution. Third-party RDP Wrapper profiles retain their own authorship and terms; this public distribution does not bundle the locally collected community INI snapshot or Microsoft's DLLs. See [THIRD_PARTY.md](THIRD_PARTY.md).
+The updater's original code, tests, and documentation are open source under the [MIT License](LICENSE). The upstream-derived base INI retains Apache-2.0 licensing and attribution. Third-party RDP Wrapper profiles retain their own authorship and terms; this distribution now bundles an owner-provided INI snapshot with its original attribution; it never includes Microsoft's DLLs. See [THIRD_PARTY.md](THIRD_PARTY.md).

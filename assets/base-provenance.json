@@ -1,11 +1,16 @@
 {
   "upstream": "https://github.com/stascorp/rdpwrap/blob/326551985f1ecf8cc1e43bd4b4505a7871534b0f/res/rdpwrap.ini",
-  "license": "Apache-2.0 for the upstream-derived global configuration",
+  "license": "Third-party baseline retains its existing authorship and applicable terms; updater MIT license does not relicense it",
   "modified": "2026-10-01",
-  "changes": ["Retained Main, SLPolicy and PatchCodes global sections", "Removed all Windows build profiles", "Added source-verified modern patch definitions"],
+  "changes": [
+    "Bundled complete user-provided baseline, preserving its existing contents and author attribution"
+  ],
   "patch_code_sources": {
     "mov_eax_1_nop_2": "https://github.com/stascorp/rdpwrap/issues/4449#issuecomment-5631314240",
     "CDefPolicy_Query_r9d_rdi_jmp": "https://github.com/stascorp/rdpwrap/issues/4449#issuecomment-5631314240",
     "jmpshort": "https://github.com/stascorp/rdpwrap/blob/326551985f1ecf8cc1e43bd4b4505a7871534b0f/res/rdpwrap.ini"
-  }
+  },
+  "baseline": "User-provided installed INI snapshot, bundled at the owner request",
+  "sha256": "29168b57c2aae3c93044397b1cef2ef66a1a0f7079669ff7bab93beada800502",
+  "version_profiles": 738
 }

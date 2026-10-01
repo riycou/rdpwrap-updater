@@ -8,7 +8,7 @@ $cachePath = Join-Path $stateDirectory 'recent-issues.json'
 try {
     # The updater bounds network requests to 40 seconds. Wait for completion so
     # shutdown cannot terminate an INI write midway through the operation.
-    & $executable --ini $Ini --auto --silent --recent 25 --cache $cachePath --log $logPath
+    & $executable --ini $Ini --auto --silent --recent 50 --cache $cachePath --log $logPath
     $runExitCode = $LASTEXITCODE
     if ($runExitCode -ne 0) { exit 0 } # Continue shutdown after a logged refusal.
 } catch {

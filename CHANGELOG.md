@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.4 — 2026-10-01
+
+- Bundles the owner-provided installed INI as a baseline, retaining 738 existing profiles and attribution.
+- Defaults to the 50 most recently updated issues with cached comments. Shutdown polling also uses 50 issues.
+- Separates 25/50-issue conditional caches and allows up to 55 requests within the network budget for a 50-issue poll.
+
 ## 1.2.3 — 2026-10-01
 
 - Handles the Windows read-only attribute during atomic INI replacement, restoring it after success or failure.
