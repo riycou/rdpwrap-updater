@@ -12,7 +12,7 @@ import updater
 
 
 class GuiTests(unittest.TestCase):
-    def exercise(self, select_with_browse):
+    def exercise(self, select_with_browse, denied=False):
         try:
             import tkinter as tk
         except ImportError:
@@ -20,7 +20,8 @@ class GuiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             ini = pathlib.Path(directory) / "rdpwrap.ini"
             ini.write_text("; temporary GUI fixture")
-            result = {"changed": False, "version": "test", "ini": str(ini)}
+            result = {"changed": denied, "version": "test", "ini": str(ini)}
+            expected = "Ready to apply." if denied else "Your profile already matches."
 
             def descendants(widget):
                 for child in widget.winfo_children():
@@ -57,14 +58,18 @@ class GuiTests(unittest.TestCase):
                     )
                     while time.monotonic() < deadline:
                         window.update()
-                        if "Your profile already matches." in output.get("1.0", "end"):
+                        if expected in output.get("1.0", "end"):
                             break
                         time.sleep(0.01)
-                    self.assertIn(
-                        "Your profile already matches.", output.get("1.0", "end")
-                    )
+                    self.assertIn(expected, output.get("1.0", "end"))
                     checked.assert_called_once_with(str(ini))
                     applied.assert_not_called()
+                    if denied:
+                        applied.side_effect = PermissionError("access denied")
+                        controls["Apply validated profile"].invoke()
+                        applied.assert_called_once()
+                        error_dialog.assert_called_once()
+                        elevation_dialog.assert_not_called()
                     self.assertEqual(
                         str(controls["Check for update"].cget("state")), "normal"
                     )
@@ -85,6 +90,8 @@ class GuiTests(unittest.TestCase):
                 ) as checked,
                 patch.object(updater, "apply") as applied,
                 patch("tkinter.filedialog.askopenfilename", return_value=str(ini)),
+                patch("tkinter.messagebox.showerror") as error_dialog,
+                patch("tkinter.messagebox.askyesno") as elevation_dialog,
             ):
                 updater.gui(initial)
 
@@ -93,6 +100,9 @@ class GuiTests(unittest.TestCase):
 
     def test_browse_starts_read_only_check(self):
         self.exercise(True)
+
+    def test_write_denied_reports_once_without_elevation_retry(self):
+        self.exercise(False, denied=True)
 
 
 if __name__ == "__main__":
