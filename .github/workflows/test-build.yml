@@ -35,5 +35,6 @@ jobs:
             LICENSE
             THIRD_PARTY.md
             licenses/
+            assets/
             Shutdown-Update.ps1
             SETUP-SHUTDOWN.txt

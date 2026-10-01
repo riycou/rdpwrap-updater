@@ -305,6 +305,7 @@ def recent_documents(cache_path, limit=25, seconds=40):
             with urllib.request.urlopen(req, timeout=min(8, remaining)) as response:
                 return json.load(response), response.headers.get("ETag")
         except urllib.error.HTTPError as e:
+            e.close()
             if e.code == 304:
                 return None, etag
             if e.code in (403, 429):
@@ -426,13 +427,127 @@ def render_update(text, version, profile):
     return text.rstrip("\r\n") + newline + newline + newline.join(blocks)
 
 
+def resolve_patch_codes(docs, version, existing, markdown=True):
+    required = set()
+    posted = {}
+    for body, url in docs:
+        sections = parse(body, markdown)
+        for section in sections.get(version, []):
+            required.update(
+                v for k, v in section.items() if k.endswith(("Code.x64", "Code.x86"))
+            )
+        for section in sections.get("PatchCodes", []):
+            for name, value in section.items():
+                posted.setdefault(name, {}).setdefault(value.upper(), []).append(url)
+    merged = dict(existing)
+    additions = {}
+    sources = {}
+    base_codes = patch_codes((ROOT / "assets" / "base.ini").read_text(encoding="utf-8"))
+    provenance = json.loads(
+        (ROOT / "assets" / "base-provenance.json").read_text(encoding="utf-8")
+    )
+    for name in sorted(required):
+        values = posted.get(name, {})
+        if values and (
+            len(values) != 1
+            or any(not re.fullmatch(r"(?:[0-9A-F]{2}){1,256}", v) for v in values)
+        ):
+            raise Refused("Conflicting or malformed posted patch definition: " + name)
+        if name in existing:
+            if values and existing[name].upper() not in values:
+                raise Refused(
+                    "Existing patch definition conflicts with posted bytes: " + name
+                )
+            continue
+        if not values:
+            if name not in base_codes:
+                raise Refused(
+                    "Missing patch definition "
+                    + name
+                    + "; no source-verified definition available"
+                )
+            values = {
+                base_codes[name].upper(): [
+                    provenance["patch_code_sources"].get(name, provenance["upstream"])
+                ]
+            }
+        value = next(iter(values))
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name):
+            raise Refused("Invalid patch definition name")
+        merged[name] = additions[name] = value
+        sources[name] = values[value]
+    return merged, additions, sources
+
+
+def insert_patch_codes(text, additions):
+    if not additions:
+        return text
+    newline = "\r\n" if "\r\n" in text else "\n"
+    lines = (
+        newline.join(name + "=" + value for name, value in sorted(additions.items()))
+        + newline
+    )
+    headers = list(re.finditer(r"(?m)^\[PatchCodes\][^\r\n]*(?:\r?\n|$)", text))
+    if len(headers) > 1:
+        raise Refused(
+            "Multiple PatchCodes sections; missing definitions require manual review"
+        )
+    if headers:
+        at = headers[0].end()
+        separator = "" if text[:at].endswith("\n") else newline
+        return text[:at] + separator + lines + text[at:]
+    return text.rstrip("\r\n") + newline + newline + "[PatchCodes]" + newline + lines
+
+
+def prepare_ini(original, existed):
+    reason = None
+    if not existed:
+        reason = "INI does not exist"
+        text = ""
+    else:
+        if original.startswith((b"\xff\xfe", b"\xfe\xff")):
+            raise Refused("UTF-16 INI requires manual review")
+        try:
+            text = original.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = ""
+            reason = "INI cannot be decoded as UTF-8"
+        if not reason:
+            sections = parse(text)
+            try:
+                main = unique(sections.get("Main", []), "Main")
+                policy = unique(sections.get("SLPolicy", []), "SLPolicy")
+                if (
+                    not main.get("LogFile")
+                    or any(
+                        main.get(k) not in ["0", "1"]
+                        for k in ["SLPolicyHookNT60", "SLPolicyHookNT61"]
+                    )
+                    or not policy
+                    or "!error" in main
+                    or "!error" in policy
+                ):
+                    raise Refused("Invalid global sections")
+                if "PatchCodes" in sections:
+                    codes = patch_codes(text)
+                    if any(
+                        not re.fullmatch(r"(?:[0-9A-Fa-f]{2}){1,256}", v)
+                        for v in codes.values()
+                    ):
+                        raise Refused("Invalid PatchCodes section")
+            except Refused as e:
+                reason = str(e)
+    if reason:
+        text = (ROOT / "assets" / "base.ini").read_text(encoding="utf-8")
+    return text, reason
+
+
 def check(path, offline=False, documents=None, offline_file=None):
     path = pathlib.Path(path).resolve()
-    original = path.read_bytes()
-    if original.startswith((b"\xff\xfe", b"\xfe\xff")):
-        raise Refused("UTF-16 INI requires manual review")
-    text = original.decode("utf-8-sig")
-    codes = patch_codes(text)
+    existed = path.exists()
+    original = path.read_bytes() if existed else b""
+    text, base_reason = prepare_ini(original, existed)
+    codes = patch_codes(text) if "PatchCodes" in parse(text) else {}
     dll = dll_path()
     binary = dll.read_bytes()
     version = fixed_version(dll)
@@ -451,6 +566,9 @@ def check(path, offline=False, documents=None, offline_file=None):
         ]
     else:
         docs = live_documents(version)
+    codes, added_codes, code_sources = resolve_patch_codes(
+        docs, version, codes, not offline
+    )
     candidates = {}
     observed = {}
     refusals = []
@@ -489,14 +607,20 @@ def check(path, offline=False, documents=None, offline_file=None):
     profile = chosen["profile"]
     binary_guard(binary, *profile, codes)
     try:
-        same = extract(text, version, codes) == profile
+        same_profile = extract(text, version, codes) == profile
     except Refused:
-        same = False
+        same_profile = False
+    same = same_profile and not added_codes and not base_reason
+    proposed = insert_patch_codes(text, added_codes)
+    if not same_profile:
+        proposed = render_update(proposed, version, profile)
+    if extract(proposed, version, patch_codes(proposed)) != profile:
+        raise Refused("Proposed INI failed final validation")
     updated = (
         original
         if same
         else (b"\xef\xbb\xbf" if original.startswith(b"\xef\xbb\xbf") else b"")
-        + render_update(text, version, profile).encode("utf-8")
+        + proposed.encode("utf-8")
     )
     return (
         {
@@ -508,20 +632,28 @@ def check(path, offline=False, documents=None, offline_file=None):
             "ini_sha256": digest(original),
             "dll_sha256": digest(binary),
             "warnings": refusals,
+            "added_patch_codes": added_codes,
+            "patch_code_sources": code_sources,
+            "ini_existed": existed,
+            "base_ini_used": bool(base_reason),
+            "base_ini_reason": base_reason,
         },
         original,
         updated,
     )
 
 
-def atomic_write(path, data):
+def atomic_write(path, data, must_create=False):
     fd, temp = tempfile.mkstemp(prefix=".rdpwrap-", suffix=".tmp", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(temp, path)
+        if must_create:
+            os.link(temp, path)
+        else:
+            os.replace(temp, path)
     finally:
         if os.path.exists(temp):
             os.unlink(temp)
@@ -531,11 +663,14 @@ def apply(result, original, updated):
     path = pathlib.Path(result["ini"])
     if not result["changed"]:
         return None
+    existed = result.get("ini_existed", True)
     if (
-        digest(path.read_bytes()) != result["ini_sha256"]
+        path.exists() != existed
+        or (existed and digest(path.read_bytes()) != result["ini_sha256"])
         or digest(dll_path().read_bytes()) != result["dll_sha256"]
     ):
         raise Refused("INI or DLL changed since check; check again")
+    path.parent.mkdir(parents=True, exist_ok=True)
     backup = path.with_name(
         path.name
         + ".backup-"
@@ -543,15 +678,18 @@ def apply(result, original, updated):
         + "-"
         + str(time.time_ns())
     )
-    with backup.open("xb") as f:
-        f.write(original)
-        f.flush()
-        os.fsync(f.fileno())
-    atomic_write(path, updated)
+    if existed:
+        with backup.open("xb") as f:
+            f.write(original)
+            f.flush()
+            os.fsync(f.fileno())
+    atomic_write(path, updated, must_create=not existed)
     if path.read_bytes() != updated:
-        atomic_write(path, original)
-        raise Refused("Verification failed; restored backup")
-    return str(backup)
+        if existed:
+            atomic_write(path, original)
+            raise Refused("Verification failed; restored backup")
+        raise Refused("New INI failed verification; inspect it before use")
+    return str(backup) if existed else None
 
 
 def gui(initial):
@@ -559,53 +697,81 @@ def gui(initial):
     from tkinter import filedialog, messagebox, ttk
 
     window = tk.Tk()
-    window.title("RDP Wrapper Updater")
+    window.title("RDP Wrapper Updater 1.2.1")
     window.geometry("780x500")
+    window.minsize(560, 320)
+    window.columnconfigure(0, weight=1)
+    window.rowconfigure(3, weight=1)
     path = tk.StringVar(value=initial)
-    offline = tk.BooleanVar(value=False)
     state = {}
+    startup_id = None
     events = queue.Queue()
-    ttk.Label(window, text="Existing rdpwrap.ini").pack(anchor="w", padx=12, pady=8)
+    ttk.Label(window, text="Existing rdpwrap.ini").grid(
+        row=0, column=0, sticky="w", padx=12, pady=8
+    )
     row = ttk.Frame(window)
-    row.pack(fill="x", padx=12)
-    ttk.Entry(row, textvariable=path).pack(side="left", fill="x", expand=True)
-    ttk.Button(
+    row.grid(row=1, column=0, sticky="ew", padx=12)
+    entry = ttk.Entry(row, textvariable=path)
+    entry.pack(side="left", fill="x", expand=True)
+
+    def browse():
+        selected = filedialog.askopenfilename(filetypes=[("INI", "*.ini")])
+        if selected:
+            path.set(selected)
+            run()
+
+    browse_button = ttk.Button(
         row,
         text="Browse",
-        command=lambda: path.set(
-            filedialog.askopenfilename(filetypes=[("INI", "*.ini")]) or path.get()
-        ),
-    ).pack(side="right")
+        command=browse,
+    )
+    browse_button.pack(side="right")
     ttk.Label(
         window,
         text="Checks issue bodies and comments in stascorp/rdpwrap. Service restart is manual.",
-    ).pack(anchor="w", padx=12, pady=8)
-    output = tk.Text(window, wrap="word")
-    output.pack(fill="both", expand=True, padx=12, pady=8)
+        wraplength=530,
+    ).grid(row=2, column=0, sticky="w", padx=12, pady=8)
+    output = tk.Text(window, wrap="word", height=8, width=50)
+    output.grid(row=3, column=0, sticky="nsew", padx=12, pady=8)
 
     def show(value):
         output.delete("1.0", "end")
         output.insert("end", value)
 
-    def worker():
+    def worker(selected_path):
         try:
-            events.put(("ok", check(path.get(), offline.get())))
+            events.put(("ok", check(selected_path)))
         except Exception as e:
             events.put(("error", str(e)))
 
     def run():
+        nonlocal startup_id
+        if startup_id is not None:
+            window.after_cancel(startup_id)
+            startup_id = None
+        if state.get("busy"):
+            return
+        selected_path = path.get()
         state.clear()
+        state["busy"] = True
         apply_button.config(state="disabled")
+        check_button.config(state="disabled")
+        browse_button.config(state="disabled")
+        entry.config(state="disabled")
         show("Checking exact DLL build and posted schema…")
-        threading.Thread(target=worker, daemon=True).start()
+        threading.Thread(target=worker, args=(selected_path,), daemon=True).start()
 
     def commit():
         try:
             r, a, b = state["checked"]
             backup = apply(r, a, b)
             show(
-                "Updated. Backup: "
-                + str(backup)
+                "Updated. "
+                + (
+                    "Backup: " + backup
+                    if backup
+                    else "Created a new INI from the bundled base."
+                )
                 + "\nRestart Remote Desktop Services when your RDP sessions are finished."
             )
             apply_button.config(state="disabled")
@@ -636,8 +802,9 @@ def gui(initial):
             messagebox.showerror("Update refused", str(e))
 
     buttons = ttk.Frame(window)
-    buttons.pack(fill="x", padx=12, pady=10)
-    ttk.Button(buttons, text="Check for update", command=run).pack(side="left")
+    buttons.grid(row=4, column=0, sticky="ew", padx=12, pady=10)
+    check_button = ttk.Button(buttons, text="Check for update", command=run)
+    check_button.pack(side="left")
     apply_button = ttk.Button(
         buttons, text="Apply validated profile", command=commit, state="disabled"
     )
@@ -646,6 +813,10 @@ def gui(initial):
     def poll():
         try:
             status, value = events.get_nowait()
+            state["busy"] = False
+            check_button.config(state="normal")
+            browse_button.config(state="normal")
+            entry.config(state="normal")
             if status == "error":
                 show(value)
             else:
@@ -676,6 +847,12 @@ def gui(initial):
         window.after(100, poll)
 
     window.after(100, poll)
+    if pathlib.Path(initial).parent.is_dir():
+        startup_id = window.after(200, run)
+    else:
+        show(
+            "Enter your INI destination or select an existing file using Browse. A missing or unusable INI can be rebuilt from the bundled base after a profile is validated."
+        )
     window.mainloop()
 
 
@@ -755,7 +932,7 @@ def main():
             r["backup"] = apply(r, original, updated)
         r["status"] = (
             "updated"
-            if r.get("backup")
+            if r["changed"] and (a.apply or automatic)
             else "update_available"
             if r["changed"]
             else "already_current"

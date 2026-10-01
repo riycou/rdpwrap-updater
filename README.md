@@ -6,9 +6,11 @@ A portable Windows x64 updater that finds exact-build RDP Wrapper profiles in Gi
 
 ## Download and use
 
-Download the ZIP from [Releases](https://github.com/riycou/rdpwrap-updater/releases), extract it, and open `RDPWrapUpdater.exe`. Select your existing INI, click **Check for update**, review the proposed changes, and apply them if a validated profile is available.
+Download the ZIP from [Releases](https://github.com/riycou/rdpwrap-updater/releases), extract it, and open `RDPWrapUpdater.exe`. It starts a read-only check automatically when it finds your INI. Selecting a file with **Browse** also starts a check. Review the proposed changes and apply them if a validated profile is available. **Check for update** runs another check.
 
 The default path is `C:\Program Files\RDP Wrapper\rdpwrap.ini`. A portable release needs no Python installation or AI model. Protected files require administrator access. The GUI can request elevation after a denied write; silent mode never prompts.
+
+If the INI is missing, undecodable as UTF-8, or has missing/invalid global configuration sections, the updater builds a proposal from the bundled [base INI](assets/base.ini). The base contains global configuration and verified patch definitions, **no Windows build offsets**. Only a validated profile for your installed DLL is added. Existing files are backed up before replacement; read-only checks never create or replace the INI. UTF-16 files still require manual handling. A readable, usable INI is preserved, with only missing source-verified patch definitions added as needed. The output reports when the base is used and why. This creates configuration, not an RDP Wrapper installation.
 
 ```powershell
 # Read-only check
@@ -28,7 +30,7 @@ Run automatic updates from an administrator terminal or an appropriately privile
 - Reads `termsrv.dll`'s fixed binary version, which can differ from its displayed version string.
 - Searches issue bodies and comments in [`stascorp/rdpwrap`](https://github.com/stascorp/rdpwrap).
 - Requires a complete x64 patch/SLInit profile for the exact installed DLL version.
-- Rejects unknown or misplaced fields, malformed offsets, conflicting posted values, and unsupported functions or patch definitions.
+- Rejects unknown or misplaced fields, malformed offsets, conflicting posted values, and unsupported functions. Missing patch definitions can be copied exactly from fetched `[PatchCodes]` sections or the bundled source-verified base; existing conflicting definitions are not silently overwritten.
 - Checks that main offsets fall within executable DLL sections and SLInit pointers within writable sections.
 - Verifies the INI and DLL hashes before replacing the INI, writes atomically, and checks the resulting file.
 
@@ -93,4 +95,4 @@ The public tests generate **fictional offsets** solely to test parsing; they are
 
 Bug reports and pull requests are welcome. Include your DLL's fixed version, the source issue URL, the relevant error, and a minimal redacted example. Never upload credentials or private machine logs. Changes that accept new profiles should include both valid examples and malformed/conflicting examples.
 
-The updater's original code, tests, and documentation are open source under the [MIT License](LICENSE). Third-party RDP Wrapper profiles retain their own authorship and terms; this public distribution does not bundle the locally collected community INI snapshot or Microsoft's DLLs. See [THIRD_PARTY.md](THIRD_PARTY.md).
+The updater's original code, tests, and documentation are open source under the [MIT License](LICENSE). The upstream-derived base INI retains Apache-2.0 licensing and attribution. Third-party RDP Wrapper profiles retain their own authorship and terms; this public distribution does not bundle the locally collected community INI snapshot or Microsoft's DLLs. See [THIRD_PARTY.md](THIRD_PARTY.md).

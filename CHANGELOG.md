@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.1 — 2026-10-01
+
+- Fixed the GUI layout that hid Check and Apply below the expanding text area.
+- Kept action buttons visible at the default window size and minimum size.
+- Automatically starts a read-only check when the existing INI is found or selected with Browse.
+- Reads Tkinter variables on the UI thread and disables overlapping checks.
+- Added GUI regression tests for layout, startup, and file selection. Applying remains an explicit action.
+- Added a licensed upstream-based INI template for missing or unusable configurations, with backups before replacement and exclusive creation of new files.
+- Added exact missing patch definitions from fetched sources or the source-verified base, including the `mov_eax_1_nop_2` failure reported by a user. Conflicting definitions still refuse the update.
+
 ## 1.2.0 — 2026-10-01
 
 Initial public MIT-licensed release, generated with OpenAI Codex.

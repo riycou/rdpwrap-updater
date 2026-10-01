@@ -7,6 +7,94 @@ import updater as u
 
 
 class Tests(unittest.TestCase):
+    def test_missing_codes_from_post_and_verified_base(self):
+        docs = [
+            (self.fixture, "profile"),
+            ("[PatchCodes]\npolicy=EB", "definition-source"),
+        ]
+        merged, added, sources = u.resolve_patch_codes(
+            docs, self.version, {"jmpshort": "EB"}
+        )
+        self.assertEqual(added["mov_eax_1_nop_2"], "B8010000009090")
+        self.assertEqual(added["policy"], "EB")
+        self.assertEqual(sources["policy"], ["definition-source"])
+        self.assertIn("5631314240", sources["mov_eax_1_nop_2"][0])
+        u.validate(*self.profile, merged)
+
+    def test_patch_definition_conflicts_refuse(self):
+        docs = [
+            (self.fixture, "profile"),
+            ("[PatchCodes]\npolicy=EB", "first"),
+            ("[PatchCodes]\npolicy=90", "second"),
+        ]
+        with self.assertRaises(u.Refused):
+            u.resolve_patch_codes(docs, self.version, self.codes)
+        with self.assertRaises(u.Refused):
+            u.resolve_patch_codes(
+                docs[:2], self.version, {**self.codes, "policy": "90"}
+            )
+
+    def test_base_selection_and_preserving_valid_ini(self):
+        base = (u.ROOT / "assets" / "base.ini").read_bytes()
+        self.assertIsNone(u.prepare_ini(base, True)[1])
+        for original, existed in [
+            (b"", False),
+            (b"bad file", True),
+            (b"\xff\x00bad", True),
+        ]:
+            text, reason = u.prepare_ini(original, existed)
+            self.assertTrue(reason)
+            self.assertIn("Main", u.parse(text))
+        with self.assertRaises(u.Refused):
+            u.prepare_ini(b"\xff\xfe", True)
+
+    def test_create_missing_and_rebuild_invalid_with_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            dll = root / "termsrv.dll"
+            dll.write_bytes(b"test DLL")
+            docs = [
+                (self.fixture, "profile"),
+                ("[PatchCodes]\npolicy=EB", "definition-source"),
+            ]
+            with (
+                patch.object(u, "dll_path", return_value=dll),
+                patch.object(u, "fixed_version", return_value=self.version),
+                patch.object(u, "binary_guard"),
+            ):
+                ini = root / "missing.ini"
+                result, original, proposed = u.check(ini, documents=docs)
+                self.assertTrue(result["base_ini_used"])
+                self.assertFalse(ini.exists())  # Read-only check cannot create it.
+                self.assertIsNone(u.apply(result, original, proposed))
+                self.assertEqual(
+                    u.extract(
+                        ini.read_text(), self.version, u.patch_codes(ini.read_text())
+                    ),
+                    self.profile,
+                )
+                self.assertFalse(u.check(ini, documents=docs)[0]["changed"])
+                ini.write_bytes(b"bad original")
+                result, original, proposed = u.check(ini, documents=docs)
+                self.assertEqual(ini.read_bytes(), b"bad original")
+                backup = u.apply(result, original, proposed)
+                self.assertEqual(pathlib.Path(backup).read_bytes(), b"bad original")
+
+    def test_exclusive_create_refuses_raced_in_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ini = pathlib.Path(directory) / "new.ini"
+            ini.write_bytes(b"someone else's file")
+            with self.assertRaises(FileExistsError):
+                u.atomic_write(ini, b"replacement", must_create=True)
+            self.assertEqual(ini.read_bytes(), b"someone else's file")
+            self.assertEqual(len(list(pathlib.Path(directory).iterdir())), 1)
+
+    def test_insert_definitions_preserves_existing_sections(self):
+        original = "[Main]\r\nx=1\r\n[PatchCodes]\r\njmpshort=EB\r\n[Other]\r\ny=2\r\n"
+        proposed = u.insert_patch_codes(original, {"newcode": "9090"})
+        self.assertEqual(u.patch_codes(proposed), {"newcode": "9090", "jmpshort": "EB"})
+        self.assertEqual(u.parse(original)["Other"], u.parse(proposed)["Other"])
+
     def test_recent_poll_cache_changes_and_rate_limit(self):
         import urllib.error, io, copy
 
