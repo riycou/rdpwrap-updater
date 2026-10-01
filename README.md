@@ -8,7 +8,7 @@ A portable Windows x64 updater that finds exact-build RDP Wrapper profiles in Gi
 
 Download the ZIP from [Releases](https://github.com/riycou/rdpwrap-updater/releases), extract it, and open `RDPWrapUpdater.exe`. It starts a read-only check automatically when it finds your INI. Selecting a file with **Browse** also starts a check. Review the proposed changes and apply them if a validated profile is available. **Check for update** runs another check.
 
-The default path is `C:\Program Files\RDP Wrapper\rdpwrap.ini`. A portable release needs no Python installation or AI model. Protected files require administrator access. The GUI can request elevation after a denied write; silent mode never prompts.
+The default path is `C:\Program Files\RDP Wrapper\rdpwrap.ini`. A portable release needs no Python installation or AI model. Both packaged executables require administrator access at launch. Windows requests UAC consent before starting them unless the launching process is already elevated. The updater does not relaunch itself after a denied write. Python source runs must be started in an administrator terminal when updating protected files.
 
 If the INI is missing, undecodable as UTF-8, or has missing/invalid global configuration sections, the updater builds a proposal from the bundled [base INI](assets/base.ini). The base contains global configuration and verified patch definitions, **no Windows build offsets**. Only a validated profile for your installed DLL is added. Existing files are backed up before replacement; read-only checks never create or replace the INI. UTF-16 files still require manual handling. A readable, usable INI is preserved, with only missing source-verified patch definitions added as needed. The output reports when the base is used and why. This creates configuration, not an RDP Wrapper installation.
 
@@ -60,7 +60,7 @@ Use `--cache PATH` and `--log PATH` to override locations. `GITHUB_TOKEN` is opt
 | `--ini PATH` or positional path | Existing INI to inspect/update |
 | `--check` / `--dry-run` | Check without writing the INI |
 | `--apply` / `--auto` | Check and apply a validated profile |
-| `--silent` | Suppress output; implies automatic apply unless `--check` is supplied |
+| `--silent` | Suppress application output; Windows can still request UAC consent at launch. Implies automatic apply unless `--check` is supplied |
 | `--recent 25` | Poll/cache only the 25 most recently updated issues |
 | `--cache PATH` | Recent-issue cache path |
 | `--log PATH` | Append JSON run records to this path |

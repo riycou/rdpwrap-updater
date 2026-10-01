@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2 — 2026-10-01
+
+- Both packaged executables now require administrator access through their Windows manifest.
+- Removed the application elevation retry prompt and relaunch loop. A denied write now reports an error without spawning another instance.
+- Silent/background execution must start elevated (the shutdown hook already runs as SYSTEM).
+
 ## 1.2.1 â€” 2026-10-01
 
 - Fixed the GUI layout that hid Check and Apply below the expanding text area.

@@ -1,7 +1,7 @@
 """AI-generated RDP Wrapper updater. Copyright (c) 2026 riycou. MIT License."""
 
 import argparse, ctypes, hashlib, html, json, os, pathlib, re, struct, sys, difflib
-import tempfile, time, urllib.request, urllib.parse, urllib.error, subprocess, threading, queue
+import tempfile, time, urllib.request, urllib.parse, urllib.error, threading, queue
 
 ROOT = pathlib.Path(
     getattr(sys, "_MEIPASS", pathlib.Path(__file__).resolve().parents[1])
@@ -697,7 +697,7 @@ def gui(initial):
     from tkinter import filedialog, messagebox, ttk
 
     window = tk.Tk()
-    window.title("RDP Wrapper Updater 1.2.1")
+    window.title("RDP Wrapper Updater 1.2.2")
     window.geometry("780x500")
     window.minsize(560, 320)
     window.columnconfigure(0, weight=1)
@@ -776,28 +776,10 @@ def gui(initial):
             )
             apply_button.config(state="disabled")
         except PermissionError:
-            if messagebox.askyesno(
-                "Administrator access",
-                "Writing this INI requires administrator access. Reopen the updater as administrator? You will need to check and apply again.",
-            ):
-                args = (
-                    [str(pathlib.Path(__file__).resolve())]
-                    if not getattr(sys, "frozen", False)
-                    else []
-                ) + ["--ini", path.get()]
-                rc = ctypes.windll.shell32.ShellExecuteW(
-                    None,
-                    "runas",
-                    sys.executable,
-                    subprocess.list2cmdline(args),
-                    None,
-                    1,
-                )
-                if rc <= 32:
-                    messagebox.showerror(
-                        "Elevation failed",
-                        "Administrator launch was cancelled or failed.",
-                    )
+            messagebox.showerror(
+                "Write denied",
+                "Windows denied access to the INI or backup location. The packaged updater requires administrator access at launch. Check file permissions or blocking software. No elevation retry was started.",
+            )
         except Exception as e:
             messagebox.showerror("Update refused", str(e))
 
