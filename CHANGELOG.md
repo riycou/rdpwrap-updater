@@ -1,6 +1,12 @@
 # Changelog
 
-## 1.2.2 � 2026-10-01
+## 1.2.3 — 2026-10-01
+
+- Handles the Windows read-only attribute during atomic INI replacement, restoring it after success or failure.
+- Write errors now show the exact Windows error, INI path, version, and administrator-token status.
+- Added a Windows read-only replacement/failure regression test. File locks and access-control errors are not bypassed.
+
+## 1.2.2 — 2026-10-01
 
 - Both packaged executables now require administrator access through their Windows manifest.
 - Removed the application elevation retry prompt and relaunch loop. A denied write now reports an error without spawning another instance.

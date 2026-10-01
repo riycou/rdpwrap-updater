@@ -7,6 +7,28 @@ import updater as u
 
 
 class Tests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows read-only attribute")
+    def test_readonly_ini_replacement_restores_attribute(self):
+        import os, stat
+
+        with tempfile.TemporaryDirectory() as directory:
+            ini = pathlib.Path(directory) / "rdpwrap.ini"
+            ini.write_bytes(b"old")
+            os.chmod(ini, stat.S_IREAD)
+            try:
+                u.atomic_write(ini, b"updated")
+                self.assertEqual(ini.read_bytes(), b"updated")
+                self.assertFalse(ini.stat().st_mode & stat.S_IWRITE)
+                with patch.object(
+                    u.os, "replace", side_effect=PermissionError("locked")
+                ):
+                    with self.assertRaises(PermissionError):
+                        u.atomic_write(ini, b"must not write")
+                self.assertEqual(ini.read_bytes(), b"updated")
+                self.assertFalse(ini.stat().st_mode & stat.S_IWRITE)
+            finally:
+                os.chmod(ini, stat.S_IWRITE)
+
     def test_missing_codes_from_post_and_verified_base(self):
         docs = [
             (self.fixture, "profile"),

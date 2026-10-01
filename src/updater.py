@@ -645,6 +645,8 @@ def check(path, offline=False, documents=None, offline_file=None):
 
 def atomic_write(path, data, must_create=False):
     fd, temp = tempfile.mkstemp(prefix=".rdpwrap-", suffix=".tmp", dir=path.parent)
+    readonly_cleared = False
+    kernel = None
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
@@ -653,10 +655,31 @@ def atomic_write(path, data, must_create=False):
         if must_create:
             os.link(temp, path)
         else:
+            if os.name == "nt" and path.exists():
+                kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel.GetFileAttributesW.argtypes = [ctypes.c_wchar_p]
+                kernel.GetFileAttributesW.restype = ctypes.c_uint32
+                kernel.SetFileAttributesW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32]
+                kernel.SetFileAttributesW.restype = ctypes.c_int
+                attributes = kernel.GetFileAttributesW(str(path))
+                if attributes == 0xFFFFFFFF:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if attributes & 1:
+                    if not kernel.SetFileAttributesW(str(path), attributes & ~1):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                    readonly_cleared = True
             os.replace(temp, path)
     finally:
-        if os.path.exists(temp):
-            os.unlink(temp)
+        try:
+            if readonly_cleared:
+                attributes = kernel.GetFileAttributesW(str(path))
+                if attributes == 0xFFFFFFFF or not kernel.SetFileAttributesW(
+                    str(path), attributes | 1
+                ):
+                    raise ctypes.WinError(ctypes.get_last_error())
+        finally:
+            if os.path.exists(temp):
+                os.unlink(temp)
 
 
 def apply(result, original, updated):
@@ -697,7 +720,7 @@ def gui(initial):
     from tkinter import filedialog, messagebox, ttk
 
     window = tk.Tk()
-    window.title("RDP Wrapper Updater 1.2.2")
+    window.title("RDP Wrapper Updater 1.2.3")
     window.geometry("780x500")
     window.minsize(560, 320)
     window.columnconfigure(0, weight=1)
@@ -775,10 +798,26 @@ def gui(initial):
                 + "\nRestart Remote Desktop Services when your RDP sessions are finished."
             )
             apply_button.config(state="disabled")
-        except PermissionError:
+        except PermissionError as error:
+            elevated = bool(ctypes.windll.shell32.IsUserAnAdmin())
+            failure_details = (
+                "Version: 1.2.3\n"
+                + "Administrator token: "
+                + ("yes" if elevated else "no")
+                + "\n"
+                + "INI: "
+                + path.get()
+                + "\n"
+                + "Windows error: "
+                + str(error)
+                + "\n"
+                + "WinError: "
+                + str(getattr(error, "winerror", None))
+            )
+            show(failure_details)
             messagebox.showerror(
                 "Write denied",
-                "Windows denied access to the INI or backup location. The packaged updater requires administrator access at launch. Check file permissions or blocking software. No elevation retry was started.",
+                failure_details,
             )
         except Exception as e:
             messagebox.showerror("Update refused", str(e))
