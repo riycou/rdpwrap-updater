@@ -187,23 +187,104 @@ class Tests(unittest.TestCase):
                 u.recent_documents(p)
             self.assertEqual(before, p.read_bytes())
 
+    def test_service_retry_restores_after_write_or_stop_failure(self):
+        for failed_action in ("stop", "apply", None):
+            calls = []
+
+            def service(action, names=None):
+                calls.append(action)
+                if action == "snapshot":
+                    return ["UmRdpService", "TermService"]
+                if action == failed_action:
+                    raise u.Refused("stop failed")
+
+            with (
+                patch.object(u.ctypes.windll.shell32, "IsUserAnAdmin", return_value=1),
+                patch.object(u, "service_command", side_effect=service),
+                patch.object(
+                    u,
+                    "apply",
+                    side_effect=u.Refused("write failed")
+                    if failed_action == "apply"
+                    else None,
+                    return_value="backup",
+                ),
+            ):
+                if failed_action:
+                    with self.assertRaises(u.Refused):
+                        u.apply_with_service_restart({"changed": True}, b"old", b"new")
+                else:
+                    result = {"changed": True}
+                    self.assertEqual(
+                        u.apply_with_service_restart(result, b"old", b"new"), "backup"
+                    )
+                    self.assertEqual(
+                        result["restored_services"], ["UmRdpService", "TermService"]
+                    )
+            self.assertEqual(calls, ["snapshot", "stop", "restore"])
+
+    def test_service_restore_failure_is_reported(self):
+        def service(action, names=None):
+            if action == "snapshot":
+                return ["TermService"]
+            if action == "restore":
+                raise u.Refused("cannot start")
+
+        with (
+            patch.object(u.ctypes.windll.shell32, "IsUserAnAdmin", return_value=1),
+            patch.object(u, "service_command", side_effect=service),
+            patch.object(u, "apply", return_value="backup"),
+        ):
+            with self.assertRaisesRegex(u.Refused, "INI update completed"):
+                u.apply_with_service_restart({"changed": True}, b"old", b"new")
+
     def test_fifty_issue_window_and_cache_scope(self):
         import io
+
         class Response:
             headers = {"ETag": "fifty"}
-            def __enter__(self): return self
-            def __exit__(self, *args): pass
-            def read(self, *args): return self.data.read(*args)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def read(self, *args):
+                return self.data.read(*args)
+
         calls = []
+
         def request(req, **kwargs):
             calls.append(req)
             response = Response()
-            response.data = io.BytesIO(json.dumps({"incomplete_results": False, "items": [
-                {"number": n, "body": "body", "comments": 0, "updated_at": "now", "state": "closed", "labels": [], "locked": True,
-                 "html_url": "https://github.com/stascorp/rdpwrap/issues/" + str(n)}
-                for n in range(1, 51)]}).encode())
+            response.data = io.BytesIO(
+                json.dumps(
+                    {
+                        "incomplete_results": False,
+                        "items": [
+                            {
+                                "number": n,
+                                "body": "body",
+                                "comments": 0,
+                                "updated_at": "now",
+                                "state": "closed",
+                                "labels": [],
+                                "locked": True,
+                                "html_url": "https://github.com/stascorp/rdpwrap/issues/"
+                                + str(n),
+                            }
+                            for n in range(1, 51)
+                        ],
+                    }
+                ).encode()
+            )
             return response
-        with tempfile.TemporaryDirectory() as d, patch.object(u.urllib.request, "urlopen", side_effect=request):
+
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch.object(u.urllib.request, "urlopen", side_effect=request),
+        ):
             path = pathlib.Path(d) / "cache.json"
             path.write_text(json.dumps({"limit": 25, "etag": "old"}), encoding="utf-8")
             self.assertEqual(len(u.recent_documents(path, 50)), 50)

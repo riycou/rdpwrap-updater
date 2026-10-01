@@ -23,7 +23,7 @@ If the INI is missing, undecodable as UTF-8, or has missing/invalid global confi
 .\RDPWrapUpdaterSilent.exe --ini "C:\Program Files\RDP Wrapper\rdpwrap.ini" --auto --silent --recent 50
 ```
 
-Run automatic updates from an administrator terminal or an appropriately privileged task. Every changed INI gets a timestamped backup beside it. **Service restart is manual:** finish your RDP sessions before restarting Remote Desktop Services or rebooting. The updater never stops or kills the service.
+Run automatic updates from an administrator terminal or an appropriately privileged task. Every changed INI gets a timestamped backup beside it. **Service restart is manual:** finish your RDP sessions before restarting Remote Desktop Services or rebooting. The GUI offers to stop services and retry if INI replacement is denied. It restores previously running services after the retry, including on failure. This disconnects RDP sessions; use it from the local screen. Silent/CLI runs can opt in with `--restart-service`; without this flag they never stop services.
 
 ## What it checks
 
@@ -63,6 +63,7 @@ Use `--cache PATH` and `--log PATH` to override locations. `GITHUB_TOKEN` is opt
 | `--silent` | Suppress application output; Windows can still request UAC consent at launch. Implies automatic apply unless `--check` is supplied |
 | `--recent 50` | Poll/cache only the 50 most recently updated issues |
 | `--cache PATH` | Recent-issue cache path |
+| `--restart-service` | Stop RDP services during apply, then restore previously running services; disconnects RDP sessions |
 | `--log PATH` | Append JSON run records to this path |
 | `--offline --offline-file PATH` | Read profiles from your own reference INI |
 

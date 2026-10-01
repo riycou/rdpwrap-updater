@@ -1,7 +1,7 @@
 """AI-generated RDP Wrapper updater. Copyright (c) 2026 riycou. MIT License."""
 
 import argparse, ctypes, hashlib, html, json, os, pathlib, re, struct, sys, difflib
-import tempfile, time, urllib.request, urllib.parse, urllib.error, threading, queue
+import tempfile, time, urllib.request, urllib.parse, urllib.error, threading, queue, subprocess
 
 ROOT = pathlib.Path(
     getattr(sys, "_MEIPASS", pathlib.Path(__file__).resolve().parents[1])
@@ -679,7 +679,11 @@ def atomic_write(path, data, must_create=False):
                     if not kernel.SetFileAttributesW(str(path), attributes & ~1):
                         raise ctypes.WinError(ctypes.get_last_error())
                     readonly_cleared = True
-            os.replace(temp, path)
+            try:
+                os.replace(temp, path)
+            except PermissionError as error:
+                error.updater_replace_denied = True
+                raise
     finally:
         try:
             if readonly_cleared:
@@ -726,12 +730,77 @@ def apply(result, original, updated):
     return str(backup) if existed else None
 
 
+def service_command(action, names=None):
+    """Run fixed service-control scripts without opening another terminal."""
+    if action in ("stop", "restore") and not names:
+        return None
+    scripts = {
+        "snapshot": "$seen=@{}; $names=[System.Collections.Generic.List[string]]::new(); function Visit($s) { if($seen.ContainsKey($s.Name)){return}; $seen[$s.Name]=$true; foreach($d in $s.DependentServices){Visit $d}; if($s.Status -eq 'Running'){$names.Add($s.Name)} }; Visit (Get-Service TermService -ErrorAction Stop); ConvertTo-Json -InputObject @($names.ToArray()) -Compress",
+        "stop": "$names=@(ConvertFrom-Json $env:RDPUPDATER_SERVICES); foreach($name in $names){$s=Get-Service -Name $name -ErrorAction Stop; Stop-Service -InputObject $s -ErrorAction Stop; $s.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))}",
+        "restore": "$names=@(ConvertFrom-Json $env:RDPUPDATER_SERVICES); [array]::Reverse($names); $failures=@(); foreach($name in $names){try{$s=Get-Service -Name $name -ErrorAction Stop; Start-Service -InputObject $s -ErrorAction Stop; $s.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))}catch{$failures+=($name+': '+$_.Exception.Message)}}; if($failures.Count){throw ($failures -join '; ')}",
+    }
+    env = os.environ.copy()
+    env["RDPUPDATER_SERVICES"] = json.dumps(names or [])
+    executable = (
+        pathlib.Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    )
+    completed = subprocess.run(
+        [
+            str(executable),
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$ErrorActionPreference='Stop'; " + scripts[action],
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    if completed.returncode:
+        raise Refused("Service " + action + " failed: " + completed.stderr.strip())
+    return json.loads(completed.stdout) if action == "snapshot" else None
+
+
+def apply_with_service_restart(result, original, updated):
+    if not result["changed"]:
+        return None
+    if os.name != "nt" or not ctypes.windll.shell32.IsUserAnAdmin():
+        raise Refused("Service control requires an administrator token")
+    names = service_command("snapshot")
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        raise Refused("Invalid service snapshot")
+    failure = None
+    try:
+        service_command("stop", names)
+        backup = apply(result, original, updated)
+    except Exception as error:
+        failure = error
+    try:
+        service_command("restore", names)
+    except Exception as error:
+        raise Refused(
+            "Service restoration failed; use Services to restore Remote Desktop Services. "
+            + str(error)
+            + (
+                "; Update error: " + str(failure)
+                if failure
+                else "; INI update completed."
+            )
+        ) from error
+    if failure:
+        raise failure
+    result["restored_services"] = names
+    return backup
+
+
 def gui(initial):
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
 
     window = tk.Tk()
-    window.title("RDP Wrapper Updater 1.2.4")
+    window.title("RDP Wrapper Updater 1.2.5")
     window.geometry("780x500")
     window.minsize(560, 320)
     window.columnconfigure(0, weight=1)
@@ -762,7 +831,7 @@ def gui(initial):
     browse_button.pack(side="right")
     ttk.Label(
         window,
-        text="Checks the 50 most recently updated issues and cached comments. Service restart is manual.",
+        text="Checks the 50 most recently updated issues and cached comments. Service retry is available if replacement fails.",
         wraplength=530,
     ).grid(row=2, column=0, sticky="w", padx=12, pady=8)
     output = tk.Text(window, wrap="word", height=8, width=50)
@@ -811,8 +880,27 @@ def gui(initial):
             apply_button.config(state="disabled")
         except PermissionError as error:
             elevated = bool(ctypes.windll.shell32.IsUserAnAdmin())
+            if (
+                elevated
+                and getattr(error, "updater_replace_denied", False)
+                and messagebox.askyesno(
+                    "Stop RDP services and retry?",
+                    "Windows denied replacement of the INI. Stop Remote Desktop Services and running dependent services, retry the validated update, then restore them? Active RDP sessions will disconnect. Use this from the local screen.",
+                )
+            ):
+                try:
+                    backup = apply_with_service_restart(r, a, b)
+                    show(
+                        "Updated; previously running RDP services restored. Backup: "
+                        + str(backup)
+                    )
+                    apply_button.config(state="disabled")
+                except Exception as retry_error:
+                    show(str(retry_error))
+                    messagebox.showerror("Service retry failed", str(retry_error))
+                return
             failure_details = (
-                "Version: 1.2.4\n"
+                "Version: 1.2.5\n"
                 + "Administrator token: "
                 + ("yes" if elevated else "no")
                 + "\n"
@@ -906,6 +994,11 @@ def main():
         action="store_true",
         help="Suppress terminal output; implies --auto unless --check is supplied",
     )
+    p.add_argument(
+        "--restart-service",
+        action="store_true",
+        help="Stop RDP services during apply and restore them; disconnects RDP sessions",
+    )
     p.add_argument("--log", help="Append JSON run records to this file")
     p.add_argument(
         "--recent",
@@ -961,7 +1054,9 @@ def main():
         else:
             r, original, updated = check(path)
         if a.apply or automatic:
-            r["backup"] = apply(r, original, updated)
+            r["backup"] = (apply_with_service_restart if a.restart_service else apply)(
+                r, original, updated
+            )
         r["status"] = (
             "updated"
             if r["changed"] and (a.apply or automatic)

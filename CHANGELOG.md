@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.5 — 2026-10-01
+
+- Offer a service-stop retry when an elevated GUI cannot replace the INI.
+- Add explicit `--restart-service` for unattended apply. Restore previously running dependent services even if stopping or writing fails.
+- User reported successful fresh INI creation and RDPConf fully supported/listening for 10.0.26100.9444 after stopping TermService. Actual RDP connections remain unverified.
+
 ## 1.2.4 — 2026-10-01
 
 - Bundles the owner-provided installed INI as a baseline, retaining 738 existing profiles and attribution.
